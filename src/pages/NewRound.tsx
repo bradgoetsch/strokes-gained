@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { CourseSearch } from '@/components/CourseSearch';
 
 const PAR_OPTIONS = [3, 4, 5];
 const SURFACE_OPTIONS: ShotSurface[] = ['tee', 'fairway', 'rough', 'sand', 'recovery', 'green'];
@@ -265,12 +266,15 @@ export default function NewRound() {
           <CardContent className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="course">Course Name</Label>
-              <Input
-                id="course"
-                placeholder="e.g. Pebble Beach Golf Links"
+              <CourseSearch
                 value={courseName}
-                onChange={(e) => setCourseName(e.target.value)}
+                onChange={setCourseName}
+                onSelect={(course) => setCourseName(course.name)}
+                placeholder="Search or type a course name..."
               />
+              <p className="text-xs text-muted-foreground">
+                Search powered by OpenStreetMap · or type any name manually
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="date">Round Date</Label>
@@ -567,6 +571,7 @@ function ShotEntry({ shot, shotNumber, isLast, prevShot, onUpdate, onRemove }: S
           </Label>
           <Input
             type="number"
+            inputMode="decimal"
             min={0}
             placeholder={shot.surface === 'green' ? 'feet' : 'yards'}
             value={shot.distanceToHole || ''}
@@ -631,6 +636,7 @@ function ShotEntry({ shot, shotNumber, isLast, prevShot, onUpdate, onRemove }: S
             </Label>
             <Input
               type="number"
+              inputMode="decimal"
               min={0}
               placeholder={shot.surfaceAfter === 'green' ? 'feet' : 'yards'}
               value={shot.distanceAfter ?? ''}
