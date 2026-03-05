@@ -35,15 +35,12 @@ import {
   Trash2,
   Check,
   Flag,
-  Info,
   Loader2,
   Save,
 } from 'lucide-react';
 import { LoginArea } from '@/components/auth/LoginArea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { CourseSearch } from '@/components/CourseSearch';
+import { CourseSetup, type CourseSetupValue } from '@/components/CourseSetup';
 
-const PAR_OPTIONS = [3, 4, 5];
 const SURFACE_OPTIONS: ShotSurface[] = ['tee', 'fairway', 'rough', 'sand', 'recovery', 'green'];
 
 /** Generate a simple ID */
@@ -84,7 +81,10 @@ export default function NewRound() {
   const { toast } = useToast();
 
   const [step, setStep] = useState<Step>('setup');
-  const [courseName, setCourseName] = useState('');
+  const [courseSetup, setCourseSetup] = useState<CourseSetupValue>({
+    courseName: '',
+    holes: createDefaultHoles(),
+  });
   const [roundDate, setRoundDate] = useState(new Date().toISOString().split('T')[0]);
   const [holes, setHoles] = useState<HoleData[]>(createDefaultHoles());
   const [currentHole, setCurrentHole] = useState(0);
@@ -93,11 +93,6 @@ export default function NewRound() {
   const hole = holes[currentHole];
   const totalStrokes = holes.reduce((s, h) => s + h.shots.length, 0);
   const totalPar = holes.reduce((s, h) => s + h.par, 0);
-
-  // Update hole par
-  const updateHolePar = (holeIdx: number, par: number) => {
-    setHoles((prev) => prev.map((h, i) => (i === holeIdx ? { ...h, par } : h)));
-  };
 
   // Add a shot to current hole
   const addShot = () => {
@@ -163,9 +158,20 @@ export default function NewRound() {
     [currentHole]
   );
 
+  // When setup confirms, copy scorecard holes into round holes (preserving any shots)
+  const applySetupToHoles = (setup: CourseSetupValue) => {
+    setHoles((prev) =>
+      setup.holes.map((sh, i) => ({
+        ...prev[i],
+        number: sh.number,
+        par: sh.par,
+        shots: prev[i]?.shots ?? [],
+      }))
+    );
+  };
+
   // Go to review
   const goToReview = () => {
-    // Calculate SG for all holes
     const processedHoles = holes.map(calculateHoleSG);
     setHoles(processedHoles);
     setStep('review');
@@ -179,10 +185,23 @@ export default function NewRound() {
     try {
       const processedHoles = holes.map(calculateHoleSG);
       const roundId = genId();
+
+      // Compute differential if rating/slope available
+      const { courseRating, slopeRating, teeName } = courseSetup;
+      const { calcDifferential } = await import('@/lib/handicap');
+      const handicapDifferential =
+        courseRating !== undefined && slopeRating !== undefined
+          ? parseFloat(calcDifferential(totalStrokes, courseRating, slopeRating).toFixed(1))
+          : undefined;
+
       const roundData = {
         id: roundId,
         date: roundDate,
-        courseName,
+        courseName: courseSetup.courseName,
+        teeName,
+        courseRating,
+        slopeRating,
+        handicapDifferential,
         holes: processedHoles,
         sg: calculateRoundSG(processedHoles),
         totalStrokes,
@@ -201,7 +220,7 @@ export default function NewRound() {
 
       toast({
         title: 'Round saved!',
-        description: `Your round at ${courseName} has been saved to Nostr.`,
+        description: `Your round at ${courseSetup.courseName} has been saved to Nostr.`,
       });
 
       navigate(`/round/${roundId}`);
@@ -264,18 +283,14 @@ export default function NewRound() {
             <CardTitle className="text-base">Round Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="course">Course Name</Label>
-              <CourseSearch
-                value={courseName}
-                onChange={setCourseName}
-                onSelect={(course) => setCourseName(course.name)}
-                placeholder="Search or type a course name..."
-              />
-              <p className="text-xs text-muted-foreground">
-                Search powered by OpenStreetMap · or type any name manually
-              </p>
-            </div>
+            {/* Course search + scorecard auto-fill */}
+            <CourseSetup
+              value={courseSetup}
+              onChange={(val) => setCourseSetup(val)}
+            />
+
+            <Separator />
+
             <div className="space-y-2">
               <Label htmlFor="date">Round Date</Label>
               <Input
@@ -286,50 +301,13 @@ export default function NewRound() {
               />
             </div>
 
-            <Separator />
-
-            {/* Par setup for each hole */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Label>Hole Pars</Label>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent>Set the par for each hole. Default is 4.</TooltipContent>
-                </Tooltip>
-              </div>
-              <div className="grid grid-cols-9 gap-2">
-                {holes.map((h, i) => (
-                  <div key={i} className="text-center">
-                    <div className="text-[10px] text-muted-foreground mb-1 font-medium">{h.number}</div>
-                    <Select
-                      value={String(h.par)}
-                      onValueChange={(v) => updateHolePar(i, Number(v))}
-                    >
-                      <SelectTrigger className="h-8 px-1 text-xs text-center">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAR_OPTIONS.map((p) => (
-                          <SelectItem key={p} value={String(p)}>{p}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ))}
-              </div>
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>Front 9 par: {holes.slice(0, 9).reduce((s, h) => s + h.par, 0)}</span>
-                <span>Back 9 par: {holes.slice(9).reduce((s, h) => s + h.par, 0)}</span>
-                <span>Total: {totalPar}</span>
-              </div>
-            </div>
-
             <Button
               className="w-full gap-2"
-              disabled={!courseName.trim() || !roundDate}
-              onClick={() => setStep('holes')}
+              disabled={!courseSetup.courseName.trim() || !roundDate}
+              onClick={() => {
+                applySetupToHoles(courseSetup);
+                setStep('holes');
+              }}
             >
               Start Entering Shots
               <ChevronRight className="w-4 h-4" />

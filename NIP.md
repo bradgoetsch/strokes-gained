@@ -1,10 +1,12 @@
-# Golf Round Strokes Gained (Kind 32823)
+# StrokesGained App — Custom Nostr Event Kinds
 
-## Overview
+---
 
-Kind `32823` is an **addressable event** representing a golf round with full shot-by-shot strokes gained statistics.
+## Kind 32823 — Golf Round
 
-## Event Format
+An **addressable event** representing a golf round with full shot-by-shot strokes gained statistics.
+
+### Event Format
 
 ```json
 {
@@ -17,11 +19,15 @@ Kind `32823` is an **addressable event** representing a golf round with full sho
     ["date", "<YYYY-MM-DD>"],
     ["par", "<total par>"],
     ["strokes", "<total strokes>"],
+    ["course_rating", "<course rating e.g. 72.4>"],
+    ["slope_rating", "<slope rating e.g. 131>"],
+    ["tee_name", "<tee color/name e.g. Blue>"],
     ["sg_total", "<total strokes gained>"],
     ["sg_ott", "<strokes gained off the tee>"],
     ["sg_app", "<strokes gained approach>"],
     ["sg_arg", "<strokes gained around green>"],
     ["sg_putt", "<strokes gained putting>"],
+    ["handicap_differential", "<differential for this round>"],
     ["holes", "<JSON-encoded array of hole data>"],
     ["t", "golf"],
     ["t", "strokes-gained"]
@@ -29,78 +35,113 @@ Kind `32823` is an **addressable event** representing a golf round with full sho
 }
 ```
 
-## Tag Definitions
+### Tag Definitions
 
 | Tag | Description |
 |-----|-------------|
-| `d` | Unique round identifier (UUID) |
+| `d` | Unique round identifier |
 | `alt` | Human-readable description (NIP-31) |
 | `title` | Course name |
 | `date` | Round date in YYYY-MM-DD format |
 | `par` | Total par for the round |
 | `strokes` | Total strokes taken |
+| `course_rating` | USGA course rating (optional) |
+| `slope_rating` | USGA slope rating (optional) |
+| `tee_name` | Tee played from (optional) |
 | `sg_total` | Total strokes gained vs. PGA Tour average |
 | `sg_ott` | Strokes gained: Off the Tee |
 | `sg_app` | Strokes gained: Approach |
 | `sg_arg` | Strokes gained: Around the Green |
 | `sg_putt` | Strokes gained: Putting |
+| `handicap_differential` | WHS handicap differential for this round |
 | `holes` | JSON-encoded array of `HoleData` objects |
 | `t` | Category tags: `golf`, `strokes-gained` |
 
-## Hole Data Schema
+---
 
-```typescript
-interface HoleData {
-  number: number;         // Hole number (1-18)
-  par: number;            // Hole par (3, 4, or 5)
-  shots: ShotData[];      // Array of shots
-}
+## Kind 34477 — Golf Course Scorecard
 
-interface ShotData {
-  id: string;                          // Unique shot identifier
-  distanceToHole: number;              // Yards (or feet on green)
-  surface: ShotSurface;                // "tee" | "fairway" | "rough" | "sand" | "recovery" | "green"
-  holed: boolean;                      // Whether shot was holed out
-  distanceAfter?: number;              // Distance to hole after shot
-  surfaceAfter?: ShotSurface;          // Surface after shot
-  strokesGained?: number;              // Calculated SG value
-  category?: "ott" | "approach" | "arg" | "putting";  // SG category
-}
-```
+An **addressable event** representing a golf course scorecard, crowd-sourced by app users. Any user can publish a scorecard; consumers should prefer the most recently updated version for a given course name.
 
-## Strokes Gained Methodology
-
-Strokes Gained is calculated using PGA Tour baseline data (derived from Mark Broadie's research):
-
-```
-SG = Baseline(start) - Baseline(end) - 1
-```
-
-Where `Baseline(position)` is the average number of strokes a PGA Tour player would take to hole out from that position.
-
-A positive SG value means the player gained strokes relative to the PGA Tour average; negative means they lost strokes.
-
-## Example
+### Event Format
 
 ```json
 {
-  "kind": 32823,
+  "kind": 34477,
   "content": "",
   "tags": [
-    ["d", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
-    ["alt", "Golf round: Pebble Beach on 2026-03-05"],
-    ["title", "Pebble Beach"],
-    ["date", "2026-03-05"],
-    ["par", "72"],
-    ["strokes", "78"],
-    ["sg_total", "-1.24"],
-    ["sg_ott", "+0.45"],
-    ["sg_app", "-0.80"],
-    ["sg_arg", "+0.11"],
-    ["sg_putt", "-1.00"],
-    ["holes", "[{...}]"],
+    ["d", "<normalized-course-slug>"],
+    ["alt", "Golf course scorecard: <course name>"],
+    ["name", "<Full Course Name>"],
+    ["city", "<City>"],
+    ["state", "<State/Region>"],
+    ["country", "<Country>"],
+    ["holes", "<JSON-encoded array of HolePar objects>"],
+    ["tees", "<JSON-encoded array of TeeInfo objects>"],
     ["t", "golf"],
-    ["t", "strokes-gained"]
+    ["t", "golf-course"]
   ]
 }
 ```
+
+### Tag Definitions
+
+| Tag | Description |
+|-----|-------------|
+| `d` | URL-safe slug of the course name (e.g. `pebble-beach-golf-links`) |
+| `alt` | Human-readable description (NIP-31) |
+| `name` | Full official course name |
+| `city` | City where the course is located |
+| `state` | State or region |
+| `country` | Country |
+| `holes` | JSON array of `{ number, par, strokeIndex }` for all 18 holes |
+| `tees` | JSON array of `{ name, gender, courseRating, slopeRating, yardage }` |
+| `t` | Category tags: `golf`, `golf-course` |
+
+### Schemas
+
+```typescript
+interface HolePar {
+  number: number;       // 1–18
+  par: number;          // 3, 4, or 5
+  strokeIndex?: number; // Handicap stroke index (1–18), optional
+}
+
+interface TeeInfo {
+  name: string;          // e.g. "Blue", "White", "Red"
+  gender?: string;       // "M" | "F" | "N"
+  courseRating: number;  // e.g. 74.7
+  slopeRating: number;   // e.g. 144
+  yardage?: number;      // Total yardage from this tee
+}
+```
+
+### Course Slug Generation
+
+The `d` tag is generated by lowercasing the course name, replacing spaces with hyphens, and stripping non-alphanumeric characters:
+
+```
+"Pebble Beach Golf Links" → "pebble-beach-golf-links"
+"St. Andrews (Old Course)" → "st-andrews-old-course"
+```
+
+### Conflict Resolution
+
+Since any user can publish kind 34477 events, consumers should:
+1. Query across all pubkeys for the given course slug
+2. Present the most recent event (highest `created_at`) as the primary data
+3. Allow users to edit and re-publish if data is incorrect (their publish becomes the newest)
+
+---
+
+## Handicap Index Calculation
+
+The app computes an **unofficial handicap index** using the World Handicap System (WHS) formula:
+
+```
+Differential = (Score − Course Rating) × 113 / Slope Rating
+
+Handicap Index = Average of best 8 differentials from last 20 rounds × 0.96
+```
+
+This is mathematically identical to the USGA/GHIN formula. It is **not** an official USGA handicap index and cannot be used for official competition.

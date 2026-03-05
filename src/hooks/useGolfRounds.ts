@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import type { RoundData, HoleData } from '@/lib/strokesGained';
 import { calculateHoleSG, calculateRoundSG } from '@/lib/strokesGained';
+import { calcDifferential } from '@/lib/handicap';
 import type { NostrEvent } from '@nostrify/nostrify';
 
 export const GOLF_ROUND_KIND = 32823;
@@ -22,13 +23,26 @@ export function parseRoundEvent(event: NostrEvent): RoundData | null {
     const holes: HoleData[] = JSON.parse(holesJson);
     const totalStrokes = holes.reduce((sum, h) => sum + h.shots.length, 0);
     const totalPar = holes.reduce((sum, h) => sum + h.par, 0);
-
     const sg = calculateRoundSG(holes);
+
+    const courseRatingStr = getTag('course_rating');
+    const slopeRatingStr = getTag('slope_rating');
+    const courseRating = courseRatingStr ? parseFloat(courseRatingStr) : undefined;
+    const slopeRating = slopeRatingStr ? parseFloat(slopeRatingStr) : undefined;
+
+    const handicapDifferential =
+      courseRating !== undefined && slopeRating !== undefined
+        ? parseFloat(calcDifferential(totalStrokes, courseRating, slopeRating).toFixed(1))
+        : undefined;
 
     return {
       id,
       date,
       courseName,
+      teeName: getTag('tee_name'),
+      courseRating,
+      slopeRating,
+      handicapDifferential,
       holes,
       sg,
       totalStrokes,
@@ -59,7 +73,6 @@ export function useGolfRounds() {
         .map(parseRoundEvent)
         .filter((r): r is RoundData => r !== null);
 
-      // Sort by date descending
       return rounds.sort((a, b) => b.date.localeCompare(a.date));
     },
     enabled: !!user?.pubkey,
@@ -95,7 +108,7 @@ export function buildRoundEventTags(round: RoundData): string[][] {
   const processedHoles = round.holes.map(calculateHoleSG);
   const sg = calculateRoundSG(processedHoles);
 
-  return [
+  const tags: string[][] = [
     ['d', round.id],
     ['alt', `Golf round: ${round.courseName} on ${round.date}`],
     ['title', round.courseName],
@@ -111,4 +124,11 @@ export function buildRoundEventTags(round: RoundData): string[][] {
     ['t', 'golf'],
     ['t', 'strokes-gained'],
   ];
+
+  if (round.teeName) tags.push(['tee_name', round.teeName]);
+  if (round.courseRating !== undefined) tags.push(['course_rating', String(round.courseRating)]);
+  if (round.slopeRating !== undefined) tags.push(['slope_rating', String(round.slopeRating)]);
+  if (round.handicapDifferential !== undefined) tags.push(['handicap_differential', String(round.handicapDifferential)]);
+
+  return tags;
 }

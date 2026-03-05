@@ -39,6 +39,14 @@ export interface RoundData {
   id: string;
   date: string;
   courseName: string;
+  /** Tee played (e.g. "Blue", "White") */
+  teeName?: string;
+  /** USGA course rating for the tee played */
+  courseRating?: number;
+  /** USGA slope rating for the tee played */
+  slopeRating?: number;
+  /** WHS handicap differential for this round */
+  handicapDifferential?: number;
   holes: HoleData[];
   /** Computed totals */
   sg: {

@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useGolfRounds } from '@/hooks/useGolfRounds';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { formatSG, sgColorClass, SG_CATEGORY_LABELS, SG_CATEGORY_ICONS, type SGCategory } from '@/lib/strokesGained';
+import { calcHandicapIndex, formatHandicap } from '@/lib/handicap';
+import type { HandicapRound } from '@/lib/handicap';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -78,6 +80,17 @@ export default function Dashboard() {
       </div>
     );
   }
+
+  // Calculate handicap index from rounds that have rating/slope data
+  const handicapRounds: HandicapRound[] = (rounds ?? [])
+    .filter((r) => r.courseRating !== undefined && r.slopeRating !== undefined)
+    .map((r) => ({
+      score: r.totalStrokes,
+      courseRating: r.courseRating!,
+      slopeRating: r.slopeRating!,
+      date: r.date,
+    }));
+  const handicapIndex = calcHandicapIndex(handicapRounds);
 
   // Calculate averages across all rounds
   const avgSG = rounds && rounds.length > 0
@@ -212,11 +225,13 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold">
-                        {rounds && rounds.length > 0
-                          ? Math.min(...rounds.map((r) => r.totalStrokes))
+                        {handicapIndex !== null
+                          ? formatHandicap(handicapIndex)
                           : '—'}
                       </div>
-                      <div className="text-muted-foreground">Best Score</div>
+                      <div className="text-muted-foreground">
+                        {handicapIndex !== null ? 'Hcp Index' : 'Hcp (needs rating)'}
+                      </div>
                     </div>
                   </div>
                 </div>
