@@ -18,6 +18,7 @@ import {
   type ShotSurface,
 } from '@/lib/strokesGained';
 import { buildRoundEventTags, GOLF_ROUND_KIND } from '@/hooks/useGolfRounds';
+import { calcDifferential } from '@/lib/handicap';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -40,6 +41,7 @@ import {
 } from 'lucide-react';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { CourseSetup, type CourseSetupValue } from '@/components/CourseSetup';
+import type { RoundData } from '@/lib/strokesGained';
 
 const SURFACE_OPTIONS: ShotSurface[] = ['tee', 'fairway', 'rough', 'sand', 'recovery', 'green'];
 
@@ -71,8 +73,15 @@ function createShot(): Shot {
 
 type Step = 'setup' | 'holes' | 'review';
 
-export default function NewRound() {
-  useSeoMeta({ title: 'New Round · StrokesGained' });
+interface NewRoundProps {
+  /** When provided, the editor pre-loads this round for editing */
+  initialRound?: RoundData;
+}
+
+export default function NewRound({ initialRound }: NewRoundProps = {}) {
+  const isEditing = !!initialRound;
+
+  useSeoMeta({ title: isEditing ? 'Edit Round · StrokesGained' : 'New Round · StrokesGained' });
 
   const navigate = useNavigate();
   const { user } = useCurrentUser();
@@ -80,13 +89,21 @@ export default function NewRound() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const [step, setStep] = useState<Step>('setup');
-  const [courseSetup, setCourseSetup] = useState<CourseSetupValue>({
-    courseName: '',
-    holes: createDefaultHoles(),
-  });
-  const [roundDate, setRoundDate] = useState(new Date().toISOString().split('T')[0]);
-  const [holes, setHoles] = useState<HoleData[]>(createDefaultHoles());
+  // Initialise state from existing round when editing, otherwise blank
+  const [step, setStep] = useState<Step>(isEditing ? 'holes' : 'setup');
+  const [courseSetup, setCourseSetup] = useState<CourseSetupValue>(() => ({
+    courseName: initialRound?.courseName ?? '',
+    teeName: initialRound?.teeName,
+    courseRating: initialRound?.courseRating,
+    slopeRating: initialRound?.slopeRating,
+    holes: initialRound?.holes.map((h) => ({ number: h.number, par: h.par })) ?? createDefaultHoles(),
+  }));
+  const [roundDate, setRoundDate] = useState(
+    initialRound?.date ?? new Date().toISOString().split('T')[0]
+  );
+  const [holes, setHoles] = useState<HoleData[]>(
+    initialRound?.holes ?? createDefaultHoles()
+  );
   const [currentHole, setCurrentHole] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -100,7 +117,6 @@ export default function NewRound() {
     const prevShot = hole.shots[hole.shots.length - 1];
 
     if (prevShot && !prevShot.holed) {
-      // Carry over distance/surface from the previous shot's result
       if (prevShot.distanceAfter !== undefined) {
         newShot.distanceToHole = prevShot.distanceAfter;
       }
@@ -108,7 +124,6 @@ export default function NewRound() {
         newShot.surface = prevShot.surfaceAfter;
       }
     } else if (hole.shots.length === 0) {
-      // First shot on hole is always from the tee
       newShot.surface = 'tee';
     }
 
@@ -141,7 +156,6 @@ export default function NewRound() {
             shots: h.shots.map((s) => {
               if (s.id !== shotId) return s;
               const updated = { ...s, ...updates };
-              // Auto-calculate SG
               if (
                 updated.distanceToHole > 0 &&
                 (updated.holed || (updated.distanceAfter !== undefined && updated.surfaceAfter))
@@ -177,24 +191,24 @@ export default function NewRound() {
     setStep('review');
   };
 
-  // Save round to Nostr
+  // Save (or update) round to Nostr
   const saveRound = async () => {
     if (!user) return;
     setIsSaving(true);
 
     try {
       const processedHoles = holes.map(calculateHoleSG);
-      const roundId = genId();
 
-      // Compute differential if rating/slope available
+      // When editing, reuse the same `d` tag ID so Nostr replaces the event
+      const roundId = initialRound?.id ?? genId();
+
       const { courseRating, slopeRating, teeName } = courseSetup;
-      const { calcDifferential } = await import('@/lib/handicap');
       const handicapDifferential =
         courseRating !== undefined && slopeRating !== undefined
           ? parseFloat(calcDifferential(totalStrokes, courseRating, slopeRating).toFixed(1))
           : undefined;
 
-      const roundData = {
+      const roundData: RoundData = {
         id: roundId,
         date: roundDate,
         courseName: courseSetup.courseName,
@@ -217,16 +231,17 @@ export default function NewRound() {
       });
 
       await queryClient.invalidateQueries({ queryKey: ['golf-rounds'] });
+      await queryClient.invalidateQueries({ queryKey: ['golf-round', user.pubkey, roundId] });
 
       toast({
-        title: 'Round saved!',
-        description: `Your round at ${courseSetup.courseName} has been saved to Nostr.`,
+        title: isEditing ? 'Round updated!' : 'Round saved!',
+        description: `${courseSetup.courseName} has been ${isEditing ? 'updated' : 'saved'} to Nostr.`,
       });
 
       navigate(`/round/${roundId}`);
-    } catch (err) {
+    } catch {
       toast({
-        title: 'Error saving round',
+        title: isEditing ? 'Error updating round' : 'Error saving round',
         description: 'Please try again.',
         variant: 'destructive',
       });
@@ -242,7 +257,7 @@ export default function NewRound() {
           <Flag className="w-8 h-8 text-primary" />
         </div>
         <div className="space-y-2">
-          <h3 className="text-lg font-semibold">Sign in to log rounds</h3>
+          <h3 className="text-lg font-semibold">Sign in to {isEditing ? 'edit' : 'log'} rounds</h3>
           <p className="text-muted-foreground text-sm max-w-sm">
             Connect with Nostr to save your rounds and track your progress over time.
           </p>
@@ -257,18 +272,29 @@ export default function NewRound() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">New Round</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {isEditing ? `Editing: ${initialRound.courseName}` : 'New Round'}
+          </h1>
           <p className="text-muted-foreground text-sm mt-1">
             {step === 'setup' && 'Enter course details'}
             {step === 'holes' && `Hole ${currentHole + 1} of 18 · ${totalStrokes} strokes so far`}
             {step === 'review' && 'Review your round'}
           </p>
         </div>
-        {step !== 'setup' && (
-          <Badge variant="outline" className="text-sm">
-            {totalStrokes > 0 ? `${totalStrokes > totalPar ? '+' : ''}${totalStrokes - totalPar} vs par` : `Par ${totalPar}`}
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {isEditing && step === 'setup' && (
+            <Button variant="outline" size="sm" onClick={() => setStep('holes')}>
+              Back to Shots
+            </Button>
+          )}
+          {step !== 'setup' && (
+            <Badge variant="outline" className="text-sm">
+              {totalStrokes > 0
+                ? `${totalStrokes > totalPar ? '+' : ''}${totalStrokes - totalPar} vs par`
+                : `Par ${totalPar}`}
+            </Badge>
+          )}
+        </div>
       </div>
 
       {/* Progress */}
@@ -283,7 +309,6 @@ export default function NewRound() {
             <CardTitle className="text-base">Round Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Course search + scorecard auto-fill */}
             <CourseSetup
               value={courseSetup}
               onChange={(val) => setCourseSetup(val)}
@@ -309,7 +334,7 @@ export default function NewRound() {
                 setStep('holes');
               }}
             >
-              Start Entering Shots
+              {isEditing ? 'Continue to Shots' : 'Start Entering Shots'}
               <ChevronRight className="w-4 h-4" />
             </Button>
           </CardContent>
@@ -339,6 +364,18 @@ export default function NewRound() {
             ))}
           </div>
 
+          {/* Edit course details shortcut */}
+          <button
+            onClick={() => setStep('setup')}
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors w-full px-1"
+          >
+            <span className="font-medium">{courseSetup.courseName}</span>
+            <span>·</span>
+            <span>{roundDate}</span>
+            {courseSetup.teeName && <><span>·</span><span>{courseSetup.teeName} tees</span></>}
+            <span className="underline underline-offset-2 ml-auto">Edit details</span>
+          </button>
+
           {/* Current Hole Card */}
           <Card>
             <CardHeader className="pb-3">
@@ -348,9 +385,21 @@ export default function NewRound() {
                 </CardTitle>
                 <div className="flex items-center gap-2 text-sm">
                   {hole.shots.length > 0 && (
-                    <Badge variant={hole.shots.length === hole.par ? 'secondary' : hole.shots.length < hole.par ? 'default' : 'destructive'}>
+                    <Badge
+                      variant={
+                        hole.shots.length === hole.par
+                          ? 'secondary'
+                          : hole.shots.length < hole.par
+                          ? 'default'
+                          : 'destructive'
+                      }
+                    >
                       {hole.shots.length} shots
-                      {hole.shots.length === hole.par ? ' (par)' : hole.shots.length < hole.par ? ` (${hole.par - hole.shots.length} under)` : ` (+${hole.shots.length - hole.par})`}
+                      {hole.shots.length === hole.par
+                        ? ' (par)'
+                        : hole.shots.length < hole.par
+                        ? ` (${hole.par - hole.shots.length} under)`
+                        : ` (+${hole.shots.length - hole.par})`}
                     </Badge>
                   )}
                 </div>
@@ -388,18 +437,20 @@ export default function NewRound() {
                 <div className="bg-muted/50 rounded-lg p-3 space-y-2">
                   <div className="text-xs font-medium text-muted-foreground">SG Preview (this hole)</div>
                   <div className="flex flex-wrap gap-3">
-                    {hole.shots.map((shot, idx) => (
-                      shot.strokesGained !== undefined && (
-                        <div key={shot.id} className="text-center">
-                          <div className={cn('text-sm font-bold tabular-nums', sgColorClass(shot.strokesGained))}>
-                            {formatSG(shot.strokesGained)}
+                    {hole.shots.map(
+                      (shot, idx) =>
+                        shot.strokesGained !== undefined && (
+                          <div key={shot.id} className="text-center">
+                            <div className={cn('text-sm font-bold tabular-nums', sgColorClass(shot.strokesGained))}>
+                              {formatSG(shot.strokesGained)}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              Shot {idx + 1}{' '}
+                              {shot.category ? `(${SG_CATEGORY_LABELS[shot.category]})` : ''}
+                            </div>
                           </div>
-                          <div className="text-[10px] text-muted-foreground">
-                            Shot {idx + 1} {shot.category ? `(${SG_CATEGORY_LABELS[shot.category]})` : ''}
-                          </div>
-                        </div>
-                      )
-                    ))}
+                        )
+                    )}
                   </div>
                 </div>
               )}
@@ -419,10 +470,7 @@ export default function NewRound() {
             </Button>
 
             {currentHole < 17 ? (
-              <Button
-                className="flex-1 gap-2"
-                onClick={() => setCurrentHole((p) => p + 1)}
-              >
+              <Button className="flex-1 gap-2" onClick={() => setCurrentHole((p) => p + 1)}>
                 Next Hole
                 <ChevronRight className="w-4 h-4" />
               </Button>
@@ -438,7 +486,7 @@ export default function NewRound() {
             )}
           </div>
 
-          {/* Finish early button */}
+          {/* Finish early */}
           {currentHole < 17 && totalStrokes > 0 && (
             <Button
               variant="ghost"
@@ -446,7 +494,7 @@ export default function NewRound() {
               className="w-full text-muted-foreground hover:text-foreground"
               onClick={goToReview}
             >
-              Finish & Review Early
+              {isEditing ? 'Review & Save Changes' : 'Finish & Review Early'}
             </Button>
           )}
         </div>
@@ -455,7 +503,11 @@ export default function NewRound() {
       {/* Step 3: Review */}
       {step === 'review' && (
         <div className="space-y-4">
-          <ReviewSummary holes={holes} courseName={courseName} roundDate={roundDate} />
+          <ReviewSummary
+            holes={holes}
+            courseName={courseSetup.courseName}
+            roundDate={roundDate}
+          />
 
           <div className="flex gap-3">
             <Button
@@ -476,7 +528,7 @@ export default function NewRound() {
               ) : (
                 <Save className="w-4 h-4" />
               )}
-              Save to Nostr
+              {isEditing ? 'Save Changes' : 'Save to Nostr'}
             </Button>
           </div>
         </div>
@@ -497,7 +549,6 @@ interface ShotEntryProps {
 }
 
 function ShotEntry({ shot, shotNumber, isLast, prevShot, onUpdate, onRemove }: ShotEntryProps) {
-  // A field was auto-filled from the previous shot's result if it matches
   const distanceAutoFilled =
     prevShot &&
     !prevShot.holed &&
@@ -520,15 +571,17 @@ function ShotEntry({ shot, shotNumber, isLast, prevShot, onUpdate, onRemove }: S
           </div>
           <span className="text-sm font-medium">Shot {shotNumber}</span>
           {shot.strokesGained !== undefined && (
-            <Badge
-              variant="outline"
-              className={cn('text-xs', sgColorClass(shot.strokesGained))}
-            >
+            <Badge variant="outline" className={cn('text-xs', sgColorClass(shot.strokesGained))}>
               SG: {formatSG(shot.strokesGained)}
             </Badge>
           )}
         </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={onRemove}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+          onClick={onRemove}
+        >
           <Trash2 className="w-3.5 h-3.5" />
         </Button>
       </div>
@@ -589,7 +642,13 @@ function ShotEntry({ shot, shotNumber, isLast, prevShot, onUpdate, onRemove }: S
       {/* Holed out toggle */}
       <div className="flex items-center gap-3">
         <button
-          onClick={() => onUpdate({ holed: !shot.holed, distanceAfter: shot.holed ? undefined : 0, surfaceAfter: shot.holed ? undefined : undefined })}
+          onClick={() =>
+            onUpdate({
+              holed: !shot.holed,
+              distanceAfter: shot.holed ? undefined : 0,
+              surfaceAfter: shot.holed ? undefined : undefined,
+            })
+          }
           className={cn(
             'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all',
             shot.holed
@@ -669,7 +728,6 @@ function ReviewSummary({ holes, courseName, roundDate }: ReviewSummaryProps) {
 
   return (
     <div className="space-y-4">
-      {/* Round Summary Card */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Round Summary</CardTitle>
@@ -683,7 +741,12 @@ function ReviewSummary({ holes, courseName, roundDate }: ReviewSummaryProps) {
             <div className="text-right">
               <div className="text-3xl font-bold">{totalStrokes}</div>
               <div className="text-sm text-muted-foreground">
-                {totalStrokes > totalPar ? `+${totalStrokes - totalPar}` : totalStrokes === totalPar ? 'E' : `-${totalPar - totalStrokes}`} (par {totalPar})
+                {totalStrokes > totalPar
+                  ? `+${totalStrokes - totalPar}`
+                  : totalStrokes === totalPar
+                  ? 'E'
+                  : `-${totalPar - totalStrokes}`}{' '}
+                (par {totalPar})
               </div>
             </div>
           </div>
@@ -692,8 +755,13 @@ function ReviewSummary({ holes, courseName, roundDate }: ReviewSummaryProps) {
 
           <div className="grid grid-cols-2 gap-3">
             {cats.map((cat) => (
-              <div key={cat.label} className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
-                <span className="text-sm text-muted-foreground">{cat.icon} {cat.label}</span>
+              <div
+                key={cat.label}
+                className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2"
+              >
+                <span className="text-sm text-muted-foreground">
+                  {cat.icon} {cat.label}
+                </span>
                 <span className={cn('text-sm font-bold tabular-nums', sgColorClass(cat.val))}>
                   {formatSG(cat.val)}
                 </span>
@@ -717,36 +785,51 @@ function ReviewSummary({ holes, courseName, roundDate }: ReviewSummaryProps) {
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-border">
-            {processedHoles.filter((h) => h.shots.length > 0).map((hole) => (
-              <div key={hole.number} className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0">
-                    {hole.number}
+            {processedHoles
+              .filter((h) => h.shots.length > 0)
+              .map((hole) => (
+                <div key={hole.number} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0">
+                      {hole.number}
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium">Hole {hole.number}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Par {hole.par} · {hole.shots.length} shots
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-sm font-medium">Hole {hole.number}</div>
-                    <div className="text-xs text-muted-foreground">Par {hole.par} · {hole.shots.length} shots</div>
+                  <div className="flex items-center gap-3">
+                    <Badge
+                      variant={
+                        hole.shots.length < hole.par
+                          ? 'default'
+                          : hole.shots.length === hole.par
+                          ? 'secondary'
+                          : 'destructive'
+                      }
+                      className="text-xs"
+                    >
+                      {hole.shots.length < hole.par
+                        ? `-${hole.par - hole.shots.length}`
+                        : hole.shots.length === hole.par
+                        ? 'E'
+                        : `+${hole.shots.length - hole.par}`}
+                    </Badge>
+                    {hole.totalSG !== undefined && (
+                      <span
+                        className={cn(
+                          'text-sm font-bold tabular-nums w-14 text-right',
+                          sgColorClass(hole.totalSG)
+                        )}
+                      >
+                        {formatSG(hole.totalSG)}
+                      </span>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Badge
-                    variant={hole.shots.length < hole.par ? 'default' : hole.shots.length === hole.par ? 'secondary' : 'destructive'}
-                    className="text-xs"
-                  >
-                    {hole.shots.length < hole.par
-                      ? `-${hole.par - hole.shots.length}`
-                      : hole.shots.length === hole.par
-                      ? 'E'
-                      : `+${hole.shots.length - hole.par}`}
-                  </Badge>
-                  {hole.totalSG !== undefined && (
-                    <span className={cn('text-sm font-bold tabular-nums w-14 text-right', sgColorClass(hole.totalSG))}>
-                      {formatSG(hole.totalSG)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
+              ))}
           </div>
         </CardContent>
       </Card>

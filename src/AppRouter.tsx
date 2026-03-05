@@ -4,6 +4,7 @@ import { AppLayout } from "./components/AppLayout";
 
 import Dashboard from "./pages/Dashboard";
 import NewRound from "./pages/NewRound";
+import EditRound from "./pages/EditRound";
 import RoundDetail from "./pages/RoundDetail";
 import History from "./pages/History";
 import Stats from "./pages/Stats";
@@ -36,6 +37,14 @@ export function AppRouter() {
           element={
             <AppLayout>
               <RoundDetail />
+            </AppLayout>
+          }
+        />
+        <Route
+          path="/round/:roundId/edit"
+          element={
+            <AppLayout>
+              <EditRound />
             </AppLayout>
           }
         />
