@@ -101,12 +101,21 @@ export default function NewRound() {
   // Add a shot to current hole
   const addShot = () => {
     const newShot = createShot();
-    // Prefill surface based on position
-    if (hole.shots.length === 0) {
-      newShot.surface = hole.par === 3 ? 'tee' : 'tee';
-    } else {
-      newShot.surface = 'fairway';
+    const prevShot = hole.shots[hole.shots.length - 1];
+
+    if (prevShot && !prevShot.holed) {
+      // Carry over distance/surface from the previous shot's result
+      if (prevShot.distanceAfter !== undefined) {
+        newShot.distanceToHole = prevShot.distanceAfter;
+      }
+      if (prevShot.surfaceAfter !== undefined) {
+        newShot.surface = prevShot.surfaceAfter;
+      }
+    } else if (hole.shots.length === 0) {
+      // First shot on hole is always from the tee
+      newShot.surface = 'tee';
     }
+
     setHoles((prev) =>
       prev.map((h, i) =>
         i === currentHole ? { ...h, shots: [...h.shots, newShot] } : h
@@ -379,6 +388,7 @@ export default function NewRound() {
                       shot={shot}
                       shotNumber={shotIdx + 1}
                       isLast={shotIdx === hole.shots.length - 1}
+                      prevShot={shotIdx > 0 ? hole.shots[shotIdx - 1] : undefined}
                       onUpdate={(updates) => updateShot(shot.id, updates)}
                       onRemove={() => removeShot(shot.id)}
                     />
@@ -499,11 +509,26 @@ interface ShotEntryProps {
   shot: Shot;
   shotNumber: number;
   isLast: boolean;
+  prevShot?: Shot;
   onUpdate: (updates: Partial<Shot>) => void;
   onRemove: () => void;
 }
 
-function ShotEntry({ shot, shotNumber, isLast, onUpdate, onRemove }: ShotEntryProps) {
+function ShotEntry({ shot, shotNumber, isLast, prevShot, onUpdate, onRemove }: ShotEntryProps) {
+  // A field was auto-filled from the previous shot's result if it matches
+  const distanceAutoFilled =
+    prevShot &&
+    !prevShot.holed &&
+    prevShot.distanceAfter !== undefined &&
+    shot.distanceToHole === prevShot.distanceAfter &&
+    shot.distanceToHole > 0;
+
+  const surfaceAutoFilled =
+    prevShot &&
+    !prevShot.holed &&
+    prevShot.surfaceAfter !== undefined &&
+    shot.surface === prevShot.surfaceAfter;
+
   return (
     <div className="border border-border rounded-lg p-4 space-y-4 bg-card">
       <div className="flex items-center justify-between">
@@ -529,11 +554,16 @@ function ShotEntry({ shot, shotNumber, isLast, onUpdate, onRemove }: ShotEntryPr
       <div className="grid grid-cols-2 gap-3">
         {/* Distance to hole */}
         <div className="space-y-1.5">
-          <Label className="text-xs">
+          <Label className="text-xs flex items-center gap-1.5">
             Distance to Hole
-            <span className="text-muted-foreground ml-1">
+            <span className="text-muted-foreground">
               {shot.surface === 'green' ? '(feet)' : '(yards)'}
             </span>
+            {distanceAutoFilled && (
+              <span className="text-[10px] text-primary font-medium bg-primary/10 px-1.5 py-0.5 rounded">
+                auto-filled
+              </span>
+            )}
           </Label>
           <Input
             type="number"
@@ -541,18 +571,25 @@ function ShotEntry({ shot, shotNumber, isLast, onUpdate, onRemove }: ShotEntryPr
             placeholder={shot.surface === 'green' ? 'feet' : 'yards'}
             value={shot.distanceToHole || ''}
             onChange={(e) => onUpdate({ distanceToHole: Number(e.target.value) })}
-            className="h-9"
+            className={cn('h-9', distanceAutoFilled && 'border-primary/40 bg-primary/5')}
           />
         </div>
 
         {/* Surface */}
         <div className="space-y-1.5">
-          <Label className="text-xs">Lie / Surface</Label>
+          <Label className="text-xs flex items-center gap-1.5">
+            Lie / Surface
+            {surfaceAutoFilled && (
+              <span className="text-[10px] text-primary font-medium bg-primary/10 px-1.5 py-0.5 rounded">
+                auto-filled
+              </span>
+            )}
+          </Label>
           <Select
             value={shot.surface}
             onValueChange={(v) => onUpdate({ surface: v as ShotSurface })}
           >
-            <SelectTrigger className="h-9 text-xs">
+            <SelectTrigger className={cn('h-9 text-xs', surfaceAutoFilled && 'border-primary/40 bg-primary/5')}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
