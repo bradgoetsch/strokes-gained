@@ -51,12 +51,17 @@ function genId() {
 }
 
 /** Default hole setup */
-function createDefaultHoles(): HoleData[] {
-  return Array.from({ length: 18 }, (_, i) => ({
+function createDefaultHoles(count: 9 | 18 = 18): HoleData[] {
+  return Array.from({ length: count }, (_, i) => ({
     number: i + 1,
     par: 4,
     shots: [],
   }));
+}
+
+/** Derive hole count from an existing round */
+function roundHoleCount(round: RoundData): 9 | 18 {
+  return round.holes.length <= 9 ? 9 : 18;
 }
 
 /** Create an empty shot */
@@ -91,12 +96,16 @@ export default function NewRound({ initialRound }: NewRoundProps = {}) {
 
   // Initialise state from existing round when editing, otherwise blank
   const [step, setStep] = useState<Step>(isEditing ? 'holes' : 'setup');
+  const [holeCount, setHoleCount] = useState<9 | 18>(
+    initialRound ? roundHoleCount(initialRound) : 18
+  );
+  const [nineChoice, setNineChoice] = useState<'front' | 'back'>('front');
   const [courseSetup, setCourseSetup] = useState<CourseSetupValue>(() => ({
     courseName: initialRound?.courseName ?? '',
     teeName: initialRound?.teeName,
     courseRating: initialRound?.courseRating,
     slopeRating: initialRound?.slopeRating,
-    holes: initialRound?.holes.map((h) => ({ number: h.number, par: h.par })) ?? createDefaultHoles(),
+    holes: initialRound?.holes.map((h) => ({ number: h.number, par: h.par })) ?? createDefaultHoles(initialRound ? roundHoleCount(initialRound) : 18),
   }));
   const [roundDate, setRoundDate] = useState(
     initialRound?.date ?? new Date().toISOString().split('T')[0]
@@ -174,6 +183,7 @@ export default function NewRound({ initialRound }: NewRoundProps = {}) {
 
   // When setup confirms, copy scorecard holes into round holes (preserving any shots)
   const applySetupToHoles = (setup: CourseSetupValue) => {
+    // setup.holes is already sliced to holeCount by CourseSetup
     setHoles((prev) =>
       setup.holes.map((sh, i) => ({
         ...prev[i],
@@ -277,7 +287,7 @@ export default function NewRound({ initialRound }: NewRoundProps = {}) {
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
             {step === 'setup' && 'Enter course details'}
-            {step === 'holes' && `Hole ${currentHole + 1} of 18 · ${totalStrokes} strokes so far`}
+            {step === 'holes' && `Hole ${currentHole + 1} of ${holes.length} · ${totalStrokes} strokes so far`}
             {step === 'review' && 'Review your round'}
           </p>
         </div>
@@ -299,7 +309,7 @@ export default function NewRound({ initialRound }: NewRoundProps = {}) {
 
       {/* Progress */}
       {step === 'holes' && (
-        <Progress value={((currentHole + 1) / 18) * 100} className="h-2" />
+        <Progress value={((currentHole + 1) / holes.length) * 100} className="h-2" />
       )}
 
       {/* Step 1: Setup */}
@@ -309,9 +319,63 @@ export default function NewRound({ initialRound }: NewRoundProps = {}) {
             <CardTitle className="text-base">Round Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* 9 / 18 hole toggle */}
+            <div className="space-y-2">
+              <Label>Round Type</Label>
+              <div className="flex gap-2">
+                {([18, 9] as const).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => {
+                      setHoleCount(n);
+                      // Reset courseSetup holes to default for new hole count
+                      setCourseSetup((prev) => ({
+                        ...prev,
+                        holes: createDefaultHoles(n),
+                      }));
+                    }}
+                    className={cn(
+                      'flex-1 py-2.5 rounded-lg border text-sm font-semibold transition-all',
+                      holeCount === n
+                        ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                    )}
+                  >
+                    {n} Holes
+                  </button>
+                ))}
+              </div>
+
+              {/* Front / Back 9 selector */}
+              {holeCount === 9 && (
+                <div className="flex gap-2 mt-2">
+                  {(['front', 'back'] as const).map((side) => (
+                    <button
+                      key={side}
+                      type="button"
+                      onClick={() => setNineChoice(side)}
+                      className={cn(
+                        'flex-1 py-2 rounded-lg border text-sm font-medium transition-all capitalize',
+                        nineChoice === side
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:border-primary/50'
+                      )}
+                    >
+                      {side} 9
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
             <CourseSetup
               value={courseSetup}
               onChange={(val) => setCourseSetup(val)}
+              holeCount={holeCount}
+              nineChoice={nineChoice}
             />
 
             <Separator />
@@ -469,7 +533,7 @@ export default function NewRound({ initialRound }: NewRoundProps = {}) {
               Prev
             </Button>
 
-            {currentHole < 17 ? (
+            {currentHole < holes.length - 1 ? (
               <Button className="flex-1 gap-2" onClick={() => setCurrentHole((p) => p + 1)}>
                 Next Hole
                 <ChevronRight className="w-4 h-4" />
@@ -487,7 +551,7 @@ export default function NewRound({ initialRound }: NewRoundProps = {}) {
           </div>
 
           {/* Finish early */}
-          {currentHole < 17 && totalStrokes > 0 && (
+          {currentHole < holes.length - 1 && totalStrokes > 0 && (
             <Button
               variant="ghost"
               size="sm"

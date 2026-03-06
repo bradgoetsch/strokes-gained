@@ -42,9 +42,9 @@ export function courseSlug(name: string): string {
     .replace(/\s+/g, '-');
 }
 
-/** Create a default 18-hole par array (all par 4) */
-export function defaultHoles(): HolePar[] {
-  return Array.from({ length: 18 }, (_, i) => ({
+/** Create a default par array (all par 4) for 9 or 18 holes */
+export function defaultHoles(count: 9 | 18 = 18): HolePar[] {
+  return Array.from({ length: count }, (_, i) => ({
     number: i + 1,
     par: 4,
   }));

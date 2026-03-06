@@ -43,11 +43,15 @@ export interface CourseSetupValue {
 interface CourseSetupProps {
   value: CourseSetupValue;
   onChange: (value: CourseSetupValue) => void;
+  /** How many holes this round covers — controls which holes to use from a scorecard */
+  holeCount: 9 | 18;
+  /** Which 9 to play when holeCount is 9 */
+  nineChoice?: 'front' | 'back';
 }
 
 type Mode = 'search' | 'found' | 'editing';
 
-export function CourseSetup({ value, onChange }: CourseSetupProps) {
+export function CourseSetup({ value, onChange, holeCount, nineChoice = 'front' }: CourseSetupProps) {
   const { user } = useCurrentUser();
   const { toast } = useToast();
   const { mutateAsync: publishScorecard, isPending: isPublishing } = usePublishScorecard();
@@ -61,35 +65,46 @@ export function CourseSetup({ value, onChange }: CourseSetupProps) {
     value.courseName.length >= 3 ? value.courseName : undefined
   );
 
+  /** Slice full 18-hole scorecard down to the holes we're playing */
+  const sliceHoles = (allHoles: HolePar[]): HolePar[] => {
+    if (holeCount === 18) return allHoles;
+    // For 9-hole rounds: front 9 = holes 1-9, back 9 = holes 10-18
+    const slice = nineChoice === 'back' ? allHoles.slice(9, 18) : allHoles.slice(0, 9);
+    // Re-number 1–9 so hole numbers are always sequential in the round
+    return slice.map((h, i) => ({ ...h, number: i + 1 }));
+  };
+
   // When a Nostr card is found, auto-populate
   useEffect(() => {
     if (!nostrCard) return;
-    if (mode === 'editing') return; // don't override while user is editing
+    if (mode === 'editing') return;
 
-    // Auto-select first tee if only one
     const firstTee = nostrCard.tees[0];
     setMode('found');
     onChange({
       courseName: nostrCard.name,
-      holes: nostrCard.holes,
+      holes: sliceHoles(nostrCard.holes),
       teeName: firstTee?.name,
       courseRating: firstTee?.courseRating,
       slopeRating: firstTee?.slopeRating,
     });
-  }, [nostrCard]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nostrCard, holeCount, nineChoice]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleCourseSelect = (name: string, location?: { city?: string; state?: string; country?: string }) => {
+  const handleCourseSelect = (name: string) => {
     onChange({ ...value, courseName: name });
-    // Mode will update via the nostrCard effect if found
-    // Otherwise stay in search mode so user can see it's looking
   };
 
   const handleStartEditing = () => {
     const base = nostrCard ?? blankScorecard(value.courseName);
+    // Always edit a full 18-hole scorecard in editing mode so the
+    // community data stays complete, even for 9-hole rounds
+    const fullHoles: HolePar[] = base.holes.length === 18
+      ? base.holes
+      : Array.from({ length: 18 }, (_, i) => ({ number: i + 1, par: 4 }));
     setEditCard({
       ...base,
       name: value.courseName,
-      holes: base.holes.length === 18 ? base.holes : Array.from({ length: 18 }, (_, i) => ({ number: i + 1, par: 4 })),
+      holes: fullHoles,
       tees: base.tees ?? [],
     });
     setMode('editing');
@@ -121,12 +136,12 @@ export function CourseSetup({ value, onChange }: CourseSetupProps) {
   const handleSaveAndPublish = async () => {
     if (!editCard || !user) return;
 
-    // Sync currently selected tee back to the round
     const selTee = editCard.tees.find((t) => t.name === value.teeName) ?? editCard.tees[0];
 
+    // Propagate only the holes we're actually playing
     onChange({
       courseName: editCard.name,
-      holes: editCard.holes,
+      holes: sliceHoles(editCard.holes),
       teeName: selTee?.name,
       courseRating: selTee?.courseRating,
       slopeRating: selTee?.slopeRating,
@@ -259,35 +274,41 @@ export function CourseSetup({ value, onChange }: CourseSetupProps) {
               <Badge variant="outline" className="text-xs">Par {totalPar(editCard.holes)}</Badge>
             </div>
 
-            {/* Hole pars grid */}
+            {/* Hole pars grid — always shows full 18 for the community scorecard */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-xs">Hole Pars</Label>
+                <Label className="text-xs">Hole Pars (full 18)</Label>
                 <div className="flex gap-3 text-xs text-muted-foreground">
                   <span>Out: {totalPar(editCard.holes.slice(0, 9))}</span>
                   <span>In: {totalPar(editCard.holes.slice(9))}</span>
                 </div>
               </div>
-              <div className="grid grid-cols-9 gap-1.5">
-                {editCard.holes.map((h, i) => (
-                  <div key={i} className="text-center">
-                    <div className="text-[10px] text-muted-foreground mb-1 font-medium">{h.number}</div>
-                    <Select
-                      value={String(h.par)}
-                      onValueChange={(v) => handleHolePar(i, Number(v))}
-                    >
-                      <SelectTrigger className="h-8 px-0 text-xs justify-center">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAR_OPTIONS.map((p) => (
-                          <SelectItem key={p} value={String(p)}>{p}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ))}
-              </div>
+              {/* Two rows of 9 for readability */}
+              {[editCard.holes.slice(0, 9), editCard.holes.slice(9)].map((row, rowIdx) => (
+                <div key={rowIdx} className="grid grid-cols-9 gap-1.5">
+                  {row.map((h, i) => {
+                    const globalIdx = rowIdx * 9 + i;
+                    return (
+                      <div key={globalIdx} className="text-center">
+                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">{h.number}</div>
+                        <Select
+                          value={String(h.par)}
+                          onValueChange={(v) => handleHolePar(globalIdx, Number(v))}
+                        >
+                          <SelectTrigger className="h-8 px-0 text-xs justify-center">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PAR_OPTIONS.map((p) => (
+                              <SelectItem key={p} value={String(p)}>{p}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
 
             <Separator />
