@@ -1,6 +1,6 @@
 import { useNostr } from '@nostrify/react';
 import { useNostrLogin } from '@nostrify/react/login';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { NSchema as n, NostrEvent, NostrMetadata } from '@nostrify/nostrify';
 
 export interface Account {
@@ -19,7 +19,9 @@ export function useLoggedInAccounts() {
     queryFn: async () => {
       const events = await nostr.query(
         [{ kinds: [0], authors: logins.map((l) => l.pubkey) }],
-        { signal: AbortSignal.timeout(1500) },
+        // Increased from 1500ms — slow relays were timing out before
+        // returning the profile, causing the fallback name to persist.
+        { signal: AbortSignal.timeout(8000) },
       );
 
       return logins.map(({ id, pubkey }): Account => {
@@ -33,6 +35,12 @@ export function useLoggedInAccounts() {
       });
     },
     retry: 3,
+    // Keep profile data fresh for 5 minutes so a relay-change
+    // invalidation doesn't immediately trigger a re-fetch.
+    staleTime: 5 * 60 * 1000,
+    // Hold onto the last successful result while re-fetching so the
+    // display name never drops back to the generated fallback.
+    placeholderData: keepPreviousData,
   });
 
   // Current user is the first login

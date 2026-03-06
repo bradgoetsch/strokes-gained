@@ -20,10 +20,19 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   // Use refs so the pool always has the latest data
   const relayMetadata = useRef(config.relayMetadata);
 
-  // Invalidate Nostr queries when relay metadata changes
+  // Invalidate Nostr queries when relay metadata changes.
+  // Exclude 'logins' — profile metadata doesn't depend on relay routing
+  // and invalidating it causes the display name to flicker back to the
+  // generated fallback while the re-fetch is in flight.
   useEffect(() => {
     relayMetadata.current = config.relayMetadata;
-    queryClient.invalidateQueries({ queryKey: ['nostr'] });
+    queryClient.invalidateQueries({
+      queryKey: ['nostr'],
+      predicate: (query) => {
+        const key = query.queryKey as string[];
+        return key[0] === 'nostr' && key[1] !== 'logins';
+      },
+    });
   }, [config.relayMetadata, queryClient]);
 
   // Initialize NPool only once
