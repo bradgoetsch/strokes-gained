@@ -8,6 +8,7 @@ import EditRound from "./pages/EditRound";
 import RoundDetail from "./pages/RoundDetail";
 import History from "./pages/History";
 import Stats from "./pages/Stats";
+import Profile from "./pages/Profile";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
 
@@ -61,6 +62,14 @@ export function AppRouter() {
           element={
             <AppLayout>
               <Stats />
+            </AppLayout>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <AppLayout>
+              <Profile />
             </AppLayout>
           }
         />
