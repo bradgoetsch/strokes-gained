@@ -1,0 +1,1 @@
+[![Edit with Shakespeare](https://shakespeare.diy/badge.svg)](https://shakespeare.diy/clone?url=nostr%3A%2F%2Fnpub1w0u4mt0ujm33auqz2g284r42yz89nz8dnkys243vh4t7mt7ht9gqm76u43%2Fgit.shakespeare.diy%2Fstrokes-gained)
